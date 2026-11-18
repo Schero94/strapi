@@ -1,4 +1,5 @@
 import { yup } from '@strapi/utils';
+import type { Core, Modules } from '@strapi/types';
 
 const textNodeValidator = yup.object().shape({
   type: yup.string().equals(['text']).required(),
@@ -144,6 +145,27 @@ const imageNodeValidator = yup.object().shape({
   children: yup.array().of(inlineNodeValidator).required(),
 });
 
+const invalidBlockNodeValidator = yup
+  .mixed()
+  .test('invalid-type', 'Block node is of invalid type', () => {
+    return false;
+  });
+
+type CustomBlocksRegistry = {
+  getSchemaByType(type: unknown): yup.AnySchema | undefined;
+};
+
+const getCustomBlockNodeValidator = (type: unknown): yup.AnySchema | undefined => {
+  // The validator can be used without a Strapi instance (e.g. in unit tests)
+  const instance = globalThis.strapi as Core.Strapi | undefined;
+
+  if (typeof instance?.has !== 'function' || !instance.has('custom-blocks')) {
+    return undefined;
+  }
+
+  return (instance.get('custom-blocks') as CustomBlocksRegistry).getSchemaByType(type);
+};
+
 // TODO: remove the any and replace with a correct Type
 const blockNodeValidator: any = yup.lazy((value: { type: string }) => {
   switch (value.type) {
@@ -160,11 +182,21 @@ const blockNodeValidator: any = yup.lazy((value: { type: string }) => {
     case 'code':
       return codeBlockValidator;
     default:
-      return yup.mixed().test('invalid-type', 'Block node is of invalid type', () => {
-        return false;
-      });
+      // Types registered with strapi.customBlocks.register(); anything else is rejected
+      return getCustomBlockNodeValidator(value?.type) ?? invalidBlockNodeValidator;
   }
 });
+
+/**
+ * Passed to the `validator` function of custom blocks registered with `strapi.customBlocks.register()`
+ */
+export const customBlockValidatorHelpers: Modules.CustomBlocks.CustomBlockValidatorHelpers = {
+  textNodeValidator,
+  linkNodeValidator,
+  inlineNodeValidator,
+  blockNodeValidator,
+  checkValidLink,
+};
 
 const blocksValidatorSchema = yup.array().of(blockNodeValidator);
 
